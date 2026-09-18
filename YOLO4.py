@@ -20,7 +20,7 @@ st.markdown("比出 **`start`** 手勢即可觸發：**倒數 2 秒 ➔ 自動�
 st.sidebar.header("⚙️ 系統設定")
 model_path = st.sidebar.text_input(
     "YOLO 模型路徑", 
-    "C:/Users/buffy/OneDrive/桌面/誰要做啊我/YOLO/runs/detect/train53/weights/best.pt"
+    "best.pt"
 )
 conf_threshold = st.sidebar.slider("辨識信心度 (Confidence)", 0.1, 1.0, 0.2, 0.05)
 
