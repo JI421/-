@@ -55,7 +55,7 @@ start_button = st.button("🚀 開啟攝影機並開始偵測", type="primary", 
 
 # ===== 4. 主要邏輯 =====
 if start_button:
-    cap = cv2.VideoCapture(2)
+    cap = cv2.VideoCapture(1, cv2.CAP_DSHOW)
 
     if not cap.isOpened():
         status_box.error("❌ 無法開啟攝影機，請確認設備連接。")
