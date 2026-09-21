@@ -5,6 +5,7 @@ import cv2
 import time
 from PIL import Image
 import io
+import platform
 
 # ===== 1. 網頁頁面配置 =====
 st.set_page_config(
@@ -18,6 +19,7 @@ st.markdown("比出 **`start`** 手勢即可觸發：**倒數 2 秒 ➔ 自動�
 
 # ===== 2. 側邊欄設定 =====
 st.sidebar.header("⚙️ 系統設定")
+cam_index = st.sidebar.number_input("📷 攝影機 Index", min_value=0, max_value=5, value=1, step=1)
 model_path = st.sidebar.text_input(
     
     "YOLO 模型路徑", 
@@ -56,10 +58,14 @@ start_button = st.button("🚀 開啟攝影機並開始偵測", type="primary", 
 
 # ===== 4. 主要邏輯 =====
 if start_button:
-    cap = cv2.VideoCapture(cam_index, cv2.CAP_DSHOW)
+    # 判斷是否為 Windows 系統，只有 Windows 才加 CAP_DSHOW
+    if platform.system() == "Windows":
+        cap = cv2.VideoCapture(cam_index, cv2.CAP_DSHOW)
+    else:
+        cap = cv2.VideoCapture(cam_index)
 
     if not cap.isOpened():
-        status_box.error(f"❌ 無法開啟 Index {cam_index} 的攝影機，請嘗試在左側切換其他 Index (0, 1, 2...)。")
+        status_box.error(f"❌ 無法開啟 Index {cam_index} 的攝影機。若在雲端執行，請改為本機執行。")
         st.stop()
 
     output_frames = []
