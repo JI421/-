@@ -2,9 +2,5 @@ streamlit
 ultralytics
 opencv-python-headless
 pillow
-streamlit
-ultralytics
-opencv-python-headless
-pillow
 streamlit-webrtc
 av
