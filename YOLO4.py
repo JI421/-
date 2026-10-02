@@ -21,7 +21,7 @@ st.title("🎥 手勢控制 GIF 錄影系統")
 
 st.markdown(
     "比出 **start** 手勢即可觸發："
-    "**倒數 2 秒 ➔ 自動錄影 3 秒 ➔ 下載 GIF**"
+    "**倒數 2 秒 ➔ 自動錄影 3 秒 ➔ 產生 GIF**"
 )
 
 
@@ -146,6 +146,27 @@ class GestureProcessor:
             time.sleep(0.2)
 
 
+    def make_gif(self):
+
+        if len(self.output_frames) == 0:
+            return
+
+        gif_bytes = io.BytesIO()
+
+        self.output_frames[0].save(
+            gif_bytes,
+            format="GIF",
+            save_all=True,
+            append_images=self.output_frames[1:],
+            duration=125,
+            loop=0
+        )
+
+        with self.lock:
+            self.gif_data = gif_bytes.getvalue()
+            self.state = "DONE"
+
+
     def process_frame(self, frame):
 
         img = frame.to_ndarray(format="bgr24")
@@ -257,72 +278,53 @@ class GestureProcessor:
             remaining = 3.0 - elapsed
 
 
+            if (
+                current_time - self.last_record_time
+                >= 1.0 / self.fps
+            ):
+
+                rgb = cv2.cvtColor(
+                    img,
+                    cv2.COLOR_BGR2RGB
+                )
+
+                height, width = rgb.shape[:2]
+
+                target_width = 640
+
+                target_height = int(
+                    height * target_width / width
+                )
+
+                small = cv2.resize(
+                    rgb,
+                    (
+                        target_width,
+                        target_height
+                    )
+                )
+
+                self.output_frames.append(
+                    Image.fromarray(small)
+                )
+
+                self.last_record_time = current_time
+
+
+            cv2.putText(
+                img,
+                f"REC {max(0, remaining):.1f}s",
+                (20, 50),
+                cv2.FONT_HERSHEY_SIMPLEX,
+                1.0,
+                (0, 0, 255),
+                3
+            )
+
+
             if elapsed >= 3.0:
 
-                with self.lock:
-
-                    if len(self.output_frames) > 0:
-
-                        gif_bytes = io.BytesIO()
-
-                        self.output_frames[0].save(
-                            gif_bytes,
-                            format="GIF",
-                            save_all=True,
-                            append_images=self.output_frames[1:],
-                            duration=125,
-                            loop=0
-                        )
-
-                        self.gif_data = gif_bytes.getvalue()
-
-                    self.state = "DONE"
-
-
-            else:
-
-                if (
-                    current_time - self.last_record_time
-                    >= 1.0 / self.fps
-                ):
-
-                    rgb = cv2.cvtColor(
-                        img,
-                        cv2.COLOR_BGR2RGB
-                    )
-
-                    height, width = rgb.shape[:2]
-
-                    target_width = 640
-
-                    target_height = int(
-                        height * target_width / width
-                    )
-
-                    small = cv2.resize(
-                        rgb,
-                        (
-                            target_width,
-                            target_height
-                        )
-                    )
-
-                    self.output_frames.append(
-                        Image.fromarray(small)
-                    )
-
-                    self.last_record_time = current_time
-
-
-                cv2.putText(
-                    img,
-                    f"REC {remaining:.1f}s",
-                    (20, 50),
-                    cv2.FONT_HERSHEY_SIMPLEX,
-                    1.0,
-                    (0, 0, 255),
-                    3
-                )
+                self.make_gif()
 
 
         elif state == "DONE":
@@ -466,7 +468,6 @@ with col2:
                     type="primary",
                     use_container_width=True
                 )
-
 
     else:
 
