@@ -9,7 +9,6 @@ from PIL import Image
 import io
 import threading
 import av
-import numpy as np
 
 
 st.set_page_config(
@@ -72,122 +71,84 @@ class GestureProcessor(VideoProcessorBase):
 
         self.gif_data = None
 
-        self.latest_frame = None
+        self.frame_count = 0
 
-        self.latest_boxes = []
+        self.last_boxes = []
 
-        self.running = True
+        self.last_detect_time = 0
 
-        self.inference_thread = threading.Thread(
-            target=self.inference_loop,
-            daemon=True
-        )
+        self.fps = 10
 
-        self.inference_thread.start()
+        self.last_record_time = 0
 
 
-    def inference_loop(self):
+    def detect_start(self, img):
 
-        while self.running:
+        boxes = []
 
-            frame = None
+        try:
 
-            with self.lock:
+            results = model.predict(
+                img,
+                conf=conf_threshold,
+                imgsz=320,
+                verbose=False,
+                classes=[0],
+                device="cpu"
+            )
 
-                if self.latest_frame is not None:
+            for result in results:
 
-                    frame = self.latest_frame.copy()
+                for box in result.boxes:
 
-            if frame is None:
+                    x1, y1, x2, y2 = map(
+                        int,
+                        box.xyxy[0]
+                    )
 
-                time.sleep(0.02)
-                continue
+                    boxes.append(
+                        (x1, y1, x2, y2)
+                    )
 
+                    break
 
-            with self.lock:
+                if boxes:
+                    break
 
-                state = self.state
+        except Exception:
+            boxes = []
 
-
-            if state != "WAITING":
-
-                time.sleep(0.05)
-                continue
-
-
-            try:
-
-                results = model.predict(
-                    frame,
-                    conf=conf_threshold,
-                    imgsz=320,
-                    verbose=False,
-                    classes=[0],
-                    device="cpu"
-                )
-
-                boxes = []
-
-                for result in results:
-
-                    for box in result.boxes:
-
-                        x1, y1, x2, y2 = map(
-                            int,
-                            box.xyxy[0]
-                        )
-
-                        boxes.append(
-                            (x1, y1, x2, y2)
-                        )
-
-                        break
-
-                    if boxes:
-                        break
-
-
-                with self.lock:
-
-                    self.latest_boxes = boxes
-
-                    if boxes and self.state == "WAITING":
-
-                        self.state = "COUNTDOWN"
-
-                        self.timer_start = time.time()
-
-                        self.latest_boxes = []
-
-
-            except Exception:
-
-                with self.lock:
-                    self.latest_boxes = []
-
-
-            time.sleep(0.05)
+        return boxes
 
 
     def video_frame_callback(self, frame):
 
         img = frame.to_ndarray(format="bgr24")
 
+        self.frame_count += 1
+
         current_time = time.time()
 
 
         with self.lock:
 
-            self.latest_frame = img.copy()
-
             state = self.state
-
-            boxes = list(self.latest_boxes)
-
-            timer_start = self.timer_start
 
 
         if state == "WAITING":
+
+            if self.frame_count % 5 == 0:
+
+                boxes = self.detect_start(img)
+
+                with self.lock:
+                    self.last_boxes = boxes
+
+            with self.lock:
+                boxes = list(self.last_boxes)
+
+            detected = len(boxes) > 0
+
 
             for x1, y1, x2, y2 in boxes:
 
@@ -221,9 +182,22 @@ class GestureProcessor(VideoProcessorBase):
             )
 
 
+            if detected:
+
+                with self.lock:
+
+                    if self.state == "WAITING":
+
+                        self.state = "COUNTDOWN"
+
+                        self.timer_start = current_time
+
+                        self.last_boxes = []
+
+
         elif state == "COUNTDOWN":
 
-            elapsed = current_time - timer_start
+            elapsed = current_time - self.timer_start
 
             remaining = 2.0 - elapsed
 
@@ -232,13 +206,14 @@ class GestureProcessor(VideoProcessorBase):
 
                 with self.lock:
 
-                    if self.state == "COUNTDOWN":
+                    self.state = "RECORDING"
 
-                        self.state = "RECORDING"
+                    self.timer_start = current_time
 
-                        self.timer_start = current_time
+                    self.output_frames = []
 
-                        self.output_frames = []
+                    self.last_record_time = 0
+
 
             else:
 
@@ -255,7 +230,7 @@ class GestureProcessor(VideoProcessorBase):
 
         elif state == "RECORDING":
 
-            elapsed = current_time - timer_start
+            elapsed = current_time - self.timer_start
 
             remaining = 3.0 - elapsed
 
@@ -284,32 +259,26 @@ class GestureProcessor(VideoProcessorBase):
 
             else:
 
-                rgb = cv2.cvtColor(
-                    img,
-                    cv2.COLOR_BGR2RGB
-                )
+                if (
+                    current_time - self.last_record_time
+                    >= 1.0 / self.fps
+                ):
 
-                small = cv2.resize(
-                    rgb,
-                    (640, 480)
-                )
+                    rgb = cv2.cvtColor(
+                        img,
+                        cv2.COLOR_BGR2RGB
+                    )
 
-                with self.lock:
+                    small = cv2.resize(
+                        rgb,
+                        (640, 480)
+                    )
 
-                    if (
-                        len(self.output_frames) == 0
-                        or time.time() - getattr(
-                            self,
-                            "last_frame_time",
-                            0
-                        ) >= 0.1
-                    ):
+                    self.output_frames.append(
+                        Image.fromarray(small)
+                    )
 
-                        self.output_frames.append(
-                            Image.fromarray(small)
-                        )
-
-                        self.last_frame_time = time.time()
+                    self.last_record_time = current_time
 
 
                 cv2.putText(
@@ -340,13 +309,6 @@ class GestureProcessor(VideoProcessorBase):
             img,
             format="bgr24"
         )
-
-
-    def stop(self):
-
-        self.running = False
-
-        super().stop()
 
 
 RTC_CONFIGURATION = RTCConfiguration(
@@ -389,8 +351,7 @@ with col2:
 
     st.subheader("📌 系統狀態")
 
-    status = st.empty()
-
+    status_placeholder = st.empty()
 
     if ctx.video_processor:
 
@@ -399,13 +360,12 @@ with col2:
         with processor.lock:
 
             state = processor.state
-
             gif_data = processor.gif_data
 
 
         if state == "WAITING":
 
-            status.info(
+            status_placeholder.info(
                 "🔍 **等待手勢中**\n\n"
                 "請面向攝影機比出 start 手勢"
             )
@@ -413,25 +373,41 @@ with col2:
 
         elif state == "COUNTDOWN":
 
-            status.warning(
-                "⏳ **偵測到手勢！**\n\n"
-                "即將開始錄影"
+            remaining = max(
+                0,
+                2.0 - (
+                    time.time()
+                    - processor.timer_start
+                )
+            )
+
+            status_placeholder.warning(
+                f"⏳ **偵測到手勢！**\n\n"
+                f"即將開始錄影：**{remaining:.1f} 秒**"
             )
 
 
         elif state == "RECORDING":
 
-            status.error(
-                "🔴 **錄影中...**"
+            remaining = max(
+                0,
+                3.0 - (
+                    time.time()
+                    - processor.timer_start
+                )
+            )
+
+            status_placeholder.error(
+                f"🔴 **錄影中...**\n\n"
+                f"剩餘時間：**{remaining:.1f} 秒**"
             )
 
 
         elif state == "DONE":
 
-            status.success(
+            status_placeholder.success(
                 "🎉 **錄影完成！**"
             )
-
 
             if gif_data:
 
@@ -453,7 +429,7 @@ with col2:
 
     else:
 
-        status.info(
+        status_placeholder.info(
             "📷 請按下 Start 開啟攝影機"
         )
 
