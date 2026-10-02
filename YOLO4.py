@@ -1,7 +1,7 @@
 # -- coding: utf-8 --
 
 import streamlit as st
-from streamlit_webrtc import webrtc_streamer
+from streamlit_webrtc import webrtc_streamer, VideoProcessorBase
 from ultralytics import YOLO
 import cv2
 import time
@@ -16,6 +16,14 @@ st.set_page_config(
     page_icon="🎥",
     layout="wide"
 )
+
+
+if "auto_stop" not in st.session_state:
+    st.session_state.auto_stop = False
+
+if "reset_camera" not in st.session_state:
+    st.session_state.reset_camera = False
+
 
 st.title("🎥 手勢控制 GIF 錄影系統")
 
@@ -47,14 +55,21 @@ def load_yolo_model(path):
 
 
 try:
+
     model = load_yolo_model(model_path)
+
     st.sidebar.success("✅ 模型載入成功！")
+
 except Exception as e:
-    st.sidebar.error(f"❌ 模型載入失敗：{e}")
+
+    st.sidebar.error(
+        f"❌ 模型載入失敗：{e}"
+    )
+
     st.stop()
 
 
-class GestureProcessor:
+class GestureProcessor(VideoProcessorBase):
 
     def __init__(self):
 
@@ -95,17 +110,22 @@ class GestureProcessor:
             with self.lock:
 
                 if self.latest_frame is None:
+
                     frame = None
+
                 else:
+
                     frame = self.latest_frame.copy()
 
                 state = self.state
+
 
             if frame is None:
 
                 time.sleep(0.1)
 
                 continue
+
 
             if state == "WAITING":
 
@@ -132,44 +152,72 @@ class GestureProcessor:
                             )
 
                             boxes.append(
-                                (x1, y1, x2, y2)
+                                (
+                                    x1,
+                                    y1,
+                                    x2,
+                                    y2
+                                )
                             )
 
                     with self.lock:
+
                         self.last_boxes = boxes
 
                 except Exception:
 
                     with self.lock:
+
                         self.last_boxes = []
+
 
             time.sleep(0.2)
 
 
     def make_gif(self):
 
-        if len(self.output_frames) == 0:
+        with self.lock:
+
+            frames = list(
+                self.output_frames
+            )
+
+        if len(frames) == 0:
+
+            with self.lock:
+
+                self.state = "DONE"
+
             return
+
 
         gif_bytes = io.BytesIO()
 
-        self.output_frames[0].save(
+
+        frames[0].save(
             gif_bytes,
             format="GIF",
             save_all=True,
-            append_images=self.output_frames[1:],
+            append_images=frames[1:],
             duration=125,
             loop=0
         )
 
+
         with self.lock:
-            self.gif_data = gif_bytes.getvalue()
+
+            self.gif_data = (
+                gif_bytes.getvalue()
+            )
+
             self.state = "DONE"
 
 
-    def process_frame(self, frame):
+    def recv(self, frame):
 
-        img = frame.to_ndarray(format="bgr24")
+        img = frame.to_ndarray(
+            format="bgr24"
+        )
 
         current_time = time.time()
 
@@ -179,16 +227,23 @@ class GestureProcessor:
         if self.frame_count % 3 == 0:
 
             with self.lock:
-                self.latest_frame = img.copy()
+
+                self.latest_frame = (
+                    img.copy()
+                )
 
 
         with self.lock:
 
             state = self.state
 
-            boxes = list(self.last_boxes)
+            boxes = list(
+                self.last_boxes
+            )
 
-            timer_start = self.timer_start
+            timer_start = (
+                self.timer_start
+            )
 
 
         if state == "WAITING":
@@ -206,7 +261,10 @@ class GestureProcessor:
                 cv2.putText(
                     img,
                     "start",
-                    (x1, max(30, y1 - 10)),
+                    (
+                        x1,
+                        max(30, y1 - 10)
+                    ),
                     cv2.FONT_HERSHEY_SIMPLEX,
                     0.8,
                     (0, 255, 0),
@@ -231,17 +289,25 @@ class GestureProcessor:
 
                     if self.state == "WAITING":
 
-                        self.state = "COUNTDOWN"
+                        self.state = (
+                            "COUNTDOWN"
+                        )
 
-                        self.timer_start = current_time
+                        self.timer_start = (
+                            current_time
+                        )
 
                         self.last_boxes = []
 
 
         elif state == "COUNTDOWN":
 
-            remaining = 2.0 - (
-                current_time - timer_start
+            remaining = (
+                2.0
+                - (
+                    current_time
+                    - timer_start
+                )
             )
 
 
@@ -249,13 +315,19 @@ class GestureProcessor:
 
                 with self.lock:
 
-                    self.state = "RECORDING"
+                    self.state = (
+                        "RECORDING"
+                    )
 
-                    self.timer_start = current_time
+                    self.timer_start = (
+                        current_time
+                    )
 
                     self.output_frames = []
 
-                    self.last_record_time = 0
+                    self.last_record_time = (
+                        0
+                    )
 
 
             else:
@@ -273,13 +345,20 @@ class GestureProcessor:
 
         elif state == "RECORDING":
 
-            elapsed = current_time - timer_start
+            elapsed = (
+                current_time
+                - timer_start
+            )
 
-            remaining = 3.0 - elapsed
+            remaining = (
+                3.0
+                - elapsed
+            )
 
 
             if (
-                current_time - self.last_record_time
+                current_time
+                - self.last_record_time
                 >= 1.0 / self.fps
             ):
 
@@ -288,13 +367,20 @@ class GestureProcessor:
                     cv2.COLOR_BGR2RGB
                 )
 
-                height, width = rgb.shape[:2]
+
+                height, width = (
+                    rgb.shape[:2]
+                )
+
 
                 target_width = 640
 
                 target_height = int(
-                    height * target_width / width
+                    height
+                    * target_width
+                    / width
                 )
+
 
                 small = cv2.resize(
                     rgb,
@@ -304,11 +390,19 @@ class GestureProcessor:
                     )
                 )
 
-                self.output_frames.append(
-                    Image.fromarray(small)
-                )
 
-                self.last_record_time = current_time
+                with self.lock:
+
+                    self.output_frames.append(
+                        Image.fromarray(
+                            small
+                        )
+                    )
+
+
+                self.last_record_time = (
+                    current_time
+                )
 
 
             cv2.putText(
@@ -346,53 +440,67 @@ class GestureProcessor:
         )
 
 
-    def stop(self):
+    def on_ended(self):
 
         self.running = False
 
 
-processor_holder = {
-    "processor": None
-}
+def reset_app():
+
+    st.session_state.auto_stop = False
+
+    st.session_state.reset_camera = True
 
 
-def video_frame_callback(frame):
+if st.session_state.reset_camera:
 
-    if processor_holder["processor"] is None:
-
-        processor_holder["processor"] = GestureProcessor()
-
-    return processor_holder["processor"].process_frame(frame)
+    st.session_state.reset_camera = False
 
 
-col1, col2 = st.columns([2, 1])
+col1, col2 = st.columns(
+    [2, 1]
+)
 
 
 with col1:
 
-    st.subheader("📹 攝影機即時畫面")
+    st.subheader(
+        "📹 攝影機即時畫面"
+    )
+
 
     ctx = webrtc_streamer(
         key="gesture-camera",
-        video_frame_callback=video_frame_callback,
+        video_processor_factory=(
+            GestureProcessor
+        ),
         media_stream_constraints={
             "video": True,
             "audio": False
         },
-        async_processing=True
+        async_processing=True,
+        desired_playing_state=(
+            not st.session_state.auto_stop
+        )
     )
 
 
 with col2:
 
-    st.subheader("📌 系統狀態")
+    st.subheader(
+        "📌 系統狀態"
+    )
+
 
     status_placeholder = st.empty()
 
-    processor = processor_holder["processor"]
 
+    if ctx.video_processor:
 
-    if processor is not None:
+        processor = (
+            ctx.video_processor
+        )
+
 
         with processor.lock:
 
@@ -400,14 +508,17 @@ with col2:
 
             gif_data = processor.gif_data
 
-            timer_start = processor.timer_start
+            timer_start = (
+                processor.timer_start
+            )
 
 
         if state == "WAITING":
 
             status_placeholder.info(
                 "🔍 **等待手勢中**\n\n"
-                "請面向攝影機比出 start 手勢"
+                "請面向攝影機比出 "
+                "start 手勢"
             )
 
 
@@ -415,14 +526,18 @@ with col2:
 
             remaining = max(
                 0,
-                2.0 - (
-                    time.time() - timer_start
+                2.0
+                - (
+                    time.time()
+                    - timer_start
                 )
             )
 
+
             status_placeholder.warning(
                 f"⏳ **偵測到手勢！**\n\n"
-                f"即將開始錄影：**{remaining:.1f} 秒**"
+                f"即將開始錄影："
+                f"**{remaining:.1f} 秒**"
             )
 
 
@@ -430,14 +545,18 @@ with col2:
 
             remaining = max(
                 0,
-                3.0 - (
-                    time.time() - timer_start
+                3.0
+                - (
+                    time.time()
+                    - timer_start
                 )
             )
 
+
             status_placeholder.error(
                 f"🔴 **錄影中...**\n\n"
-                f"剩餘時間：**{remaining:.1f} 秒**"
+                f"剩餘時間："
+                f"**{remaining:.1f} 秒**"
             )
 
 
@@ -452,16 +571,16 @@ with col2:
 
                 st.image(
                     gif_data,
-                    caption="🎬 生成的 GIF 預覽",
+                    caption="🎬 GIF 預覽",
                     use_container_width=True
                 )
 
 
                 st.download_button(
-                    label="💾 下載 GIF 檔案",
+                    label="💾 下載 GIF",
                     data=gif_data,
                     file_name=(
-                        f"gesture_record_"
+                        "gesture_record_"
                         f"{int(time.time())}.gif"
                     ),
                     mime="image/gif",
@@ -469,11 +588,30 @@ with col2:
                     use_container_width=True
                 )
 
+
+                st.button(
+                    "🔄 重新開始",
+                    on_click=reset_app,
+                    use_container_width=True
+                )
+
+
+                st.session_state.auto_stop = True
+
+
     else:
 
         status_placeholder.info(
             "📷 請按下 Start 開啟攝影機"
         )
+
+
+if (
+    ctx.video_processor
+    and ctx.video_processor.state == "DONE"
+):
+
+    st.session_state.auto_stop = True
 
 
 st.markdown("---")
